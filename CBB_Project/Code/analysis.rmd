@@ -1,0 +1,237 @@
+---
+title: "March Madness Analysis"
+author: "Tobin Haefele"
+date: "sys.Date()"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# import libraries
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(ggplot2)
+library(ggcorrplot)
+library(rpart)
+library(rpart.plot)
+
+# import data
+df <- read.csv("archive/cbb.csv")
+```
+## Introduction
+In my analysis I want to examine the relationship between various statistics and the success of college basketball teams in the NCAA tournament. I will use the data to create a logistic regression model to predict the success of teams in the tournament. I will also use a classification tree and random forest to predict the success of teams in the tournament. I will then compare the models to see which is the most accurate.
+
+### Data
+I consolidated the data into a single csv file which allows for easy access and manipulation. The data includes over 10 years of college basketball statistics and tournament results. Mainly I want to focus on the teams that won the tournament and the statistics that are most important in determining the success of a team in the tournament.
+
+================================================================================
+## Initial regression analysis
+My initial model will add a column for tournament champion as a binary. I will then create a logistic regression model to predict the success of teams in the tournament.
+```{r}
+###Regression analysis of tournament teams
+
+#add a column for champion as a binary
+df$CHAMPION <- ifelse(df$POSTSEASON == "Champions", 1, 0)
+
+#remove columns that are not needed, all teams play the same number of games
+df <- df %>% select(-c(G, POSTSEASON))
+
+print(colnames(df))
+
+#logistic regression model
+logit_model <- glm(CHAMPION ~ ADJOE + ADJDE + BARTHAG + EFG_O + EFG_D,TOR + TORD + ORB + DRB + FTR + FTRD + `X2P_O` + `X2P_D` + `X3P_O` + `X3P_D` + ADJ_T + WAB, data = df, family = "binomial")
+
+#summary of logistic regression model
+summary(logit_model)
+```
+================================================================================
+```{r}
+#test a prediction model by creating a training and test set
+#set seed
+set.seed(123)
+
+#split data into training and test set
+train <- sample(1:nrow(df), 0.8*nrow(df))
+train_set <- df[train,]
+test_set <- df[-train,]
+
+# create logistic regression model
+logit_model2 <- glm(CHAMPION ~ ADJOE + ADJDE + EFG_O + EFG_D,TOR + TORD + ORB + DRB + FTR + FTRD + `X2P_O` + `X2P_D` + `X3P_O` + `X3P_D` + ADJ_T + WAB,data = train_set, family = "binomial")
+
+# summary of logistic regression model
+summary(logit_model)
+
+#predict on test set
+pred <- predict(logit_model2, test_set, type = "response")
+
+
+
+```
+================================================================================
+```{r}
+#create a classification tree
+library(rpart)
+
+#set seed
+set.seed(123)
+
+#split data into training and test set
+train <- sample(1:nrow(df), 0.8*nrow(df))
+
+train_set <- df[train,]
+test_set <- df[-train,]
+
+# create classification tree
+tree <- rpart(CHAMPION ~ ADJOE + ADJDE + EFG_O + EFG_D,TOR + TORD + ORB + DRB + FTR + FTRD + `X2P_O` + `X2P_D` + `X3P_O` + `X3P_D` + ADJ_T + WAB, data = train_set, method = "class")
+
+#plot tree with rpart.plot
+library(rpart.plot)
+rpart.plot(tree)
+
+#summary of tree
+summary(tree)
+
+#predict on test set
+pred <- predict(tree, test_set, type = "class")
+
+#confusion matrix
+table(test_set$MDE, pred)
+
+#label confusion matrix
+library(caret)
+confusionMatrix(table(test_set$MDE, pred))
+
+#accuracy
+mean(test_set$MDE == pred)
+
+#precision
+mean(test_set$MDE == pred & pred == 1)
+
+#recall
+mean(test_set$MDE == pred & test_set$MDE == 1)
+
+#f1 score
+f1_score <- function(x, y){
+  precision <- mean(x == y & y == 1)
+  recall <- mean(x == y & x == 1)
+  return(2 * precision * recall / (precision + recall))
+}
+
+f1_score(test_set$MDE, pred)
+
+#ROC curve
+library(ROCR)
+
+pred <- prediction(pred, test_set$MDE)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+
+#AUC
+auc <- performance(pred, "auc")
+
+#plot ROC curve with AUC
+plot(perf)
+abline(a = 0, b = 1)
+text(0.5, 0.5, paste("AUC = ", round(auc, 2)))
+```
+================================================================================
+```{r}
+#random forest
+library(randomForest)
+
+#set seed
+set.seed(123)
+
+#split data into training and test set
+train <- sample(1:nrow(df), 0.8*nrow(df))
+
+train_set <- df[train,]
+test_set <- df[-train,]
+
+# create random forest
+rf <- randomForest(MDE ~ ADJOE + ADJDE + DRB + ADJ_T, data = train_set, ntree = 100)
+
+#summary of random forest
+summary(rf)
+
+#predict on test set
+pred <- predict(rf, test_set, type = "class")
+
+#confusion matrix
+table(test_set$MDE, pred)
+
+#label confusion matrix
+library(caret)
+confusionMatrix(table(test_set$MDE, pred))
+
+#accuracy
+mean(test_set$MDE == pred)
+
+#precision
+mean(test_set$MDE == pred & pred == 1)
+
+#recall
+mean(test_set$MDE == pred & test_set$MDE == 1)
+
+#f1 score
+f1_score <- function(x, y){
+  precision <- mean(x == y & y == 1)
+  recall <- mean(x == y & x == 1)
+  return(2 * precision * recall / (precision + recall))
+}
+
+f1_score(test_set$MDE, pred)
+```
+
+### Glossary
+Variables
+RK (Only in cbb20): The ranking of the team at the end of the regular season according to barttorvik
+
+TEAM: The Division I college basketball school
+
+CONF: The Athletic Conference in which the school participates in (A10 = Atlantic 10, ACC = Atlantic Coast Conference, AE = America East, Amer = American, ASun = ASUN, B10 = Big Ten, B12 = Big 12, BE = Big East, BSky = Big Sky, BSth = Big South, BW = Big West, CAA = Colonial Athletic Association, CUSA = Conference USA, Horz = Horizon League, Ivy = Ivy League, MAAC = Metro Atlantic Athletic Conference, MAC = Mid-American Conference, MEAC = Mid-Eastern Athletic Conference, MVC = Missouri Valley Conference, MWC = Mountain West, NEC = Northeast Conference, OVC = Ohio Valley Conference, P12 = Pac-12, Pat = Patriot League, SB = Sun Belt, SC = Southern Conference, SEC = South Eastern Conference, Slnd = Southland Conference, Sum = Summit League, SWAC = Southwestern Athletic Conference, WAC = Western Athletic Conference, WCC = West Coast Conference)
+
+G: Number of games played
+
+W: Number of games won
+
+ADJOE: Adjusted Offensive Efficiency (An estimate of the offensive efficiency (points scored per 100 possessions) a team would have against the average Division I defense)
+
+ADJDE: Adjusted Defensive Efficiency (An estimate of the defensive efficiency (points allowed per 100 possessions) a team would have against the average Division I offense)
+
+BARTHAG: Power Rating (Chance of beating an average Division I team)
+
+EFG_O: Effective Field Goal Percentage Shot
+
+EFG_D: Effective Field Goal Percentage Allowed
+
+TOR: Turnover Percentage Allowed (Turnover Rate)
+
+TORD: Turnover Percentage Committed (Steal Rate)
+
+ORB: Offensive Rebound Rate
+
+DRB: Offensive Rebound Rate Allowed
+
+FTR : Free Throw Rate (How often the given team shoots Free Throws)
+
+FTRD: Free Throw Rate Allowed
+
+2P_O: Two-Point Shooting Percentage
+
+2P_D: Two-Point Shooting Percentage Allowed
+
+3P_O: Three-Point Shooting Percentage
+
+3P_D: Three-Point Shooting Percentage Allowed
+
+ADJ_T: Adjusted Tempo (An estimate of the tempo (possessions per 40 minutes) a team would have against the team that wants to play at an average Division I tempo)
+
+WAB: Wins Above Bubble (The bubble refers to the cut off between making the NCAA March Madness Tournament and not making it)
+
+POSTSEASON: Round where the given team was eliminated or where their season ended (R68 = First Four, R64 = Round of 64, R32 = Round of 32, S16 = Sweet Sixteen, E8 = Elite Eight, F4 = Final Four, 2ND = Runner-up, Champion = Winner of the NCAA March Madness Tournament for that given year)
+
+SEED: Seed in the NCAA March Madness Tournament
+
+YEAR: Season
